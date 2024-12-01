@@ -37,6 +37,9 @@
     <Filter Include="imgui\backends">
       <UniqueIdentifier>{8f87f63a-067b-4a3e-83b7-3b9c2aa573aa}</UniqueIdentifier>
     </Filter>
+    <Filter Include="stb_image">
+      <UniqueIdentifier>{579bc20a-3c0f-4063-9d3b-b3225cd3aa65}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="imgui\imconfig.h">
@@ -62,6 +65,11 @@
     </ClInclude>
     <ClInclude Include="imgui\imgui_impl_win32.h">
       <Filter>imgui\backends</Filter>
+    </ClInclude>
+    <ClInclude Include="dx12_helpers.h" />
+    <ClInclude Include="image_loading.h" />
+    <ClInclude Include="stb_image\stb_image.h">
+      <Filter>stb_image</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

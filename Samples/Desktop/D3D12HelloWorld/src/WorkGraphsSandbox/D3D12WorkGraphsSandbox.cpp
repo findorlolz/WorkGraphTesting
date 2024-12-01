@@ -16,10 +16,11 @@
 //=================================================================================================================================
 
 #include "dx12_helpers.h"
+#include "image_loading.h"
+
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_dx12.h"
 #include "imgui/imgui_impl_win32.h" 
-
 namespace 
 {
     D3DContext* gD3DContext = nullptr;
@@ -151,6 +152,17 @@ int main(int, char**)
 	bool show_another_window = false;
 	ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
+    image_data image;
+    {
+		// Get CPU/GPU handles for the shader resource view
+		// Normally your engine will have some sort of allocator for these.
+		// In our example we use a simple ExampleDescriptorHeapAllocator helper.
+		D3D.srv_desc_heap_alloc.Alloc(&image.srv_cpu_handle, &image.srv_gpu_handle);
+
+		// Load the texture from a file
+		bool ret = LoadTextureFromFile("data/albert.jpg", D3D.device, image.srv_cpu_handle, &image.texture, &image.width, &image.height);
+    }
+
 	// Main loop
 	bool done = false;
     while (!done)
@@ -178,7 +190,16 @@ int main(int, char**)
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
 
-        ImGui::ShowDemoWindow(&show_demo_window);
+        //ImGui::ShowDemoWindow(&show_demo_window);
+        {
+			ImGui::Begin("DirectX12 Texture Test");
+			ImGui::Text("CPU handle = %p", image.srv_cpu_handle.ptr);
+			ImGui::Text("GPU handle = %p", image.srv_gpu_handle.ptr);
+			ImGui::Text("size = %d x %d", image.width, image.height);
+			// Note that we pass the GPU SRV handle here, *not* the CPU handle. We're passing the internal pointer value, cast to an ImTextureID
+			ImGui::Image((ImTextureID)image.srv_gpu_handle.ptr, ImVec2((float)image.width, (float)image.height));
+			ImGui::End();
+        }
         ImGui::Render();
 
 		FrameContext* frameCtx = WaitForNextFrameResources(D3D);

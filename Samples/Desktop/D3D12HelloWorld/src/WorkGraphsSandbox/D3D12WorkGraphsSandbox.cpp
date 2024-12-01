@@ -16,6 +16,16 @@
 //=================================================================================================================================
 
 #include "dx12_helpers.h"
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_dx12.h"
+#include "imgui/imgui_impl_win32.h" 
+
+namespace 
+{
+    D3DContext* gD3DContext = nullptr;
+}
+
+LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 class WorkGraphContext
 {
@@ -81,31 +91,142 @@ public:
     UINT WorkGraphIndex = 0;
 };
 
-//=================================================================================================================================
-void PrintID(D3D12_NODE_ID ID)
+int main(int, char**)
 {
-    vector<char> name;
-    name.resize(wcslen(ID.Name) + 1);
-    WideCharToMultiByte(DXC_CP_ACP, 0, ID.Name, -1, name.data(), (int)name.size(), nullptr, nullptr);
-    if (ID.ArrayIndex)
+	WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"ImGui Example", nullptr };
+	::RegisterClassExW(&wc);
+	HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Dear ImGui DirectX12 Example", WS_OVERLAPPEDWINDOW, 100, 100, 1280, 800, nullptr, nullptr, wc.hInstance, nullptr);
+
+	const char* pFile = g_File;
+	const size_t cSize = strlen(pFile) + 1;
+	g_wFile.resize(cSize);
+	size_t converted = 0;
+	mbstowcs_s(&converted, &g_wFile[0], cSize, pFile, cSize);
+	if (converted != cSize)
+	{
+		PRINT("Failed to convert filename to WCHAR.");
+		return -1;
+	}
+	PRINT(">>> Compiling library...\n");
+	CComPtr<ID3DBlob> library;
+	VERIFY_SUCCEEDED(CompileDxilLibraryFromFile(g_wFile.c_str(), L"lib_6_8", nullptr, 0, &library));
+
+	PRINT(">>> Device init...\n");
+	D3DContext D3D;
+	InitDeviceAndContext(D3D, hwnd);
+    gD3DContext = &D3D;
+
+	// Show the window
+	::ShowWindow(hwnd, SW_SHOWDEFAULT);
+	::UpdateWindow(hwnd);
+
+	// Setup Dear ImGui context
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO(); (void)io;
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+
+	// Setup Dear ImGui style
+	ImGui::StyleColorsDark();
+	//ImGui::StyleColorsLight();
+
+	// Setup Platform/Renderer backends
+	ImGui_ImplWin32_Init(hwnd);
+
+	ImGui_ImplDX12_InitInfo init_info = {};
+	init_info.Device = D3D.device;
+	init_info.CommandQueue = D3D.command_queue;
+	init_info.NumFramesInFlight = APP_NUM_FRAMES_IN_FLIGHT;
+	init_info.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	// Allocating SRV descriptors (for textures) is up to the application, so we provide callbacks.
+	// (current version of the backend will only allocate one descriptor, future versions will need to allocate more)
+	init_info.SrvDescriptorHeap = D3D.srv_desc_heap;
+	init_info.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu_handle, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu_handle) { return gD3DContext->srv_desc_heap_alloc.Alloc(out_cpu_handle, out_gpu_handle); };
+	init_info.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle, D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle) { return gD3DContext->srv_desc_heap_alloc.Free(cpu_handle, gpu_handle); };
+	ImGui_ImplDX12_Init(&init_info);
+
+	// Our state
+	bool show_demo_window = true;
+	bool show_another_window = false;
+	ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+
+	// Main loop
+	bool done = false;
+    while (!done)
     {
-        PRINT("(" << name.data() << "," << ID.ArrayIndex << ")");
+		MSG msg;
+		while (::PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE))
+		{
+			::TranslateMessage(&msg);
+			::DispatchMessage(&msg);
+			if (msg.message == WM_QUIT)
+				done = true;
+		}
+		if (done)
+			break;
+
+		if (D3D.SwapChainOccluded && D3D.swapchain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED)
+		{
+			::Sleep(10);
+			continue;
+		}
+        D3D.SwapChainOccluded = false;
+
+		// Start the Dear ImGui frame
+		ImGui_ImplDX12_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+		ImGui::NewFrame();
+
+        ImGui::ShowDemoWindow(&show_demo_window);
+        ImGui::Render();
+
+		FrameContext* frameCtx = WaitForNextFrameResources(D3D);
+		UINT backBufferIdx = D3D.swapchain->GetCurrentBackBufferIndex();
+		frameCtx->CommandAllocator->Reset();
+
+        D3D.command_list->Reset(frameCtx->CommandAllocator, nullptr);
+        Transition(D3D.command_list, D3D.main_render_target_resource[backBufferIdx], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+		// Render Dear ImGui graphics
+		const float clear_color_with_alpha[4] = { clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w };
+		D3D.command_list->ClearRenderTargetView(D3D.mainRenderTargetDescriptor[backBufferIdx], clear_color_with_alpha, 0, nullptr);
+		D3D.command_list->OMSetRenderTargets(1, &D3D.mainRenderTargetDescriptor[backBufferIdx], FALSE, nullptr);
+		D3D.command_list->SetDescriptorHeaps(1, &D3D.srv_desc_heap);
+		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), D3D.command_list);
+
+        Transition(D3D.command_list, D3D.main_render_target_resource[backBufferIdx], D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+		D3D.command_list->Close();
+
+        D3D.command_queue->ExecuteCommandLists(1, (ID3D12CommandList* const*)&D3D.command_list);
+
+		// Present
+		HRESULT hr = D3D.swapchain->Present(1, 0);   // Present with vsync
+		//HRESULT hr = g_pSwapChain->Present(0, 0); // Present without vsync
+		D3D.SwapChainOccluded = (hr == DXGI_STATUS_OCCLUDED);
+
+		UINT64 fenceValue = D3D.FenceValue + 1;
+		D3D.command_queue->Signal(D3D.fence, fenceValue);
+        D3D.FenceValue = fenceValue;
+		frameCtx->FenceValue = fenceValue;
     }
-    else
-    {
-        PRINT(name.data());
-    }
+
+    WaitForLastSubmittedFrame(D3D);
+
+	// Cleanup
+	ImGui_ImplDX12_Shutdown();
+	ImGui_ImplWin32_Shutdown();
+	ImGui::DestroyContext();
+
+    CleanDeviceAndContext(D3D);
+	::DestroyWindow(hwnd);
+	::UnregisterClassW(wc.lpszClassName, wc.hInstance);
+
+    return 0;
 }
 
 //=================================================================================================================================
-void PrintHelp()
-{
-    PRINT("Optional arguments: [-c] [hlsl filename]");
-    PRINT("If filename not used, the WorkGraphs.hlsl is assumed by default.");
-    PRINT("'-c' uses collections (see comments in code).");
-}
-
-//=================================================================================================================================
+#if 0
 int main(int argc, char* argv[])
 {
     try
@@ -115,52 +236,6 @@ int main(int argc, char* argv[])
             " D3D12 Work Graphs Sandbox \n" <<
             "==================================================================================");
         const char* pFile = g_File;
-        if (argc > 1)
-        {
-            if (argc == 2)
-            {
-                if ((strcmp(argv[1], "-?") == 0) || (strcmp(argv[1], "/?") == 0))
-                {
-                    PrintHelp();
-                    return 0;
-                }
-                else if ((strcmp(argv[1], "-c") == 0) || (strcmp(argv[1], "/c") == 0))
-                {
-                    g_bUseCollections = true;
-                }
-                else
-                {
-                    // assume file name
-                    pFile = argv[1];
-                }
-            }
-            else if (argc == 3)
-            {
-                for (INT i = 1; i < argc; i++)
-                {
-                    if ((strcmp(argv[i], "-c") == 0) || (strcmp(argv[i], "/c") == 0))
-                    {
-                        g_bUseCollections = true;
-                    }
-                    else
-                    {
-                        pFile = argv[i];
-                    }
-                }
-                if (!g_bUseCollections)
-                {
-                    PRINT("ERROR: Bad arguments.");
-                    PrintHelp();
-                    return 0;
-                }
-            }
-            else
-            {
-                PrintHelp();
-                return 0;
-            }
-        }
-
         const size_t cSize = strlen(pFile) + 1;
         g_wFile.resize(cSize);
         size_t converted = 0;
@@ -493,6 +568,8 @@ int main(int argc, char* argv[])
             "==================================================================================\n" <<
             " Execution complete\n" <<
             "==================================================================================");
+
+        
     }
     catch (HRESULT)
     {
@@ -500,4 +577,43 @@ int main(int argc, char* argv[])
         return -1;
     }
     return 0;
+}
+#endif
+
+// Forward declare message handler from imgui_impl_win32.cpp
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+// Win32 message handler
+// You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
+// - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or clear/overwrite your copy of the mouse data.
+// - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or clear/overwrite your copy of the keyboard data.
+// Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
+LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+		return true;
+
+	switch (msg)
+	{
+	case WM_SIZE:
+#if 0
+		if (g_pd3dDevice != nullptr && wParam != SIZE_MINIMIZED)
+		{
+			WaitForLastSubmittedFrame();
+			CleanupRenderTarget();
+			HRESULT result = g_pSwapChain->ResizeBuffers(0, (UINT)LOWORD(lParam), (UINT)HIWORD(lParam), DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
+			assert(SUCCEEDED(result) && "Failed to resize swapchain.");
+			CreateRenderTarget();
+		}
+#endif
+		return 0;
+	case WM_SYSCOMMAND:
+		if ((wParam & 0xfff0) == SC_KEYMENU) // Disable ALT application menu
+			return 0;
+		break;
+	case WM_DESTROY:
+		::PostQuitMessage(0);
+		return 0;
+	}
+	return ::DefWindowProcW(hWnd, msg, wParam, lParam);
 }

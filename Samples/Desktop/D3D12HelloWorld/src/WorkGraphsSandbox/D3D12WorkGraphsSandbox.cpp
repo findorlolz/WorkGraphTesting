@@ -596,16 +596,14 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	switch (msg)
 	{
 	case WM_SIZE:
-#if 0
-		if (g_pd3dDevice != nullptr && wParam != SIZE_MINIMIZED)
+		if (gD3DContext->device != nullptr && wParam != SIZE_MINIMIZED)
 		{
-			WaitForLastSubmittedFrame();
-			CleanupRenderTarget();
-			HRESULT result = g_pSwapChain->ResizeBuffers(0, (UINT)LOWORD(lParam), (UINT)HIWORD(lParam), DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
+			WaitForLastSubmittedFrame(*gD3DContext);
+			CleanupRenderTarget(*gD3DContext);
+			HRESULT result = gD3DContext->swapchain->ResizeBuffers(0, (UINT)LOWORD(lParam), (UINT)HIWORD(lParam), DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
 			assert(SUCCEEDED(result) && "Failed to resize swapchain.");
-			CreateRenderTarget();
+			CreateRenderTarget(*gD3DContext);
 		}
-#endif
 		return 0;
 	case WM_SYSCOMMAND:
 		if ((wParam & 0xfff0) == SC_KEYMENU) // Disable ALT application menu

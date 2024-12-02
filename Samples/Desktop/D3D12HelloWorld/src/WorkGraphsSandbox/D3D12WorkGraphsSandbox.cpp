@@ -31,72 +31,98 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 class WorkGraphContext
 {
 public:
-    void Init(D3DContext& D3D, CComPtr<ID3D12StateObject> pSO, LPCWSTR pWorkGraphName)
-    {
-        CComPtr<ID3D12StateObjectProperties1> spSOProps;
-        spSOProps = pSO;
-        hWorkGraph = spSOProps->GetProgramIdentifier(pWorkGraphName);
-        spWGProps = pSO;
-        WorkGraphIndex = spWGProps->GetWorkGraphIndex(pWorkGraphName);
-
+	void Init(D3DContext& D3D, LPCWSTR pWorkGraphName)
+	{
+		CComPtr<ID3D12StateObjectProperties1> spSOProps;
+		spSOProps = state_object;
+		hWorkGraph = spSOProps->GetProgramIdentifier(pWorkGraphName);
+		CComPtr<ID3D12WorkGraphProperties> spWGProps;
+		spWGProps = state_object;
+		UINT WorkGraphIndex = spWGProps->GetWorkGraphIndex(pWorkGraphName);
         spWGProps->GetWorkGraphMemoryRequirements(WorkGraphIndex, &MemReqs);
-        BackingMemory.SizeInBytes = MemReqs.MaxSizeInBytes;
-        MakeBuffer(D3D, &spBackingMemory, BackingMemory.SizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-        BackingMemory.StartAddress = spBackingMemory->GetGPUVirtualAddress();
-        NumEntrypoints = spWGProps->GetNumEntrypoints(WorkGraphIndex);
-        NumNodes = spWGProps->GetNumNodes(WorkGraphIndex);
+		BackingMemory.SizeInBytes = MemReqs.MaxSizeInBytes;
+		MakeBuffer(D3D, &backing_memory, BackingMemory.SizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		BackingMemory.StartAddress = backing_memory->GetGPUVirtualAddress();
+	}
 
-        for (UINT i = 0; i < NumNodes; i++)
-        {
-            UINT LRATIndex = spWGProps->GetNodeLocalRootArgumentsTableIndex(WorkGraphIndex, i);
-            if (LRATIndex != -1)
-            {
-                MaxLocalRootArgumentsTableIndex = max((int)LRATIndex, MaxLocalRootArgumentsTableIndex);
-            }
-        }
+	ID3D12Resource* backing_memory = nullptr;
+	D3D12_GPU_VIRTUAL_ADDRESS_RANGE BackingMemory = {};
+	D3D12_PROGRAM_IDENTIFIER hWorkGraph = {};
+	D3D12_WORK_GRAPH_MEMORY_REQUIREMENTS MemReqs = {};
 
-        if (MaxLocalRootArgumentsTableIndex >= 0)
-        {
-            UINT NumTableEntries = MaxLocalRootArgumentsTableIndex + 1;
-            LocalRootArgumentsTable.SizeInBytes = NumTableEntries * sizeof(UINT);
-            LocalRootArgsData.resize(NumTableEntries);
-            for (auto& arg : LocalRootArgsData)
-            {
-                arg = -1; // setting unused entries to -1
-            }
-            for (UINT i = 0; i < NumNodes; i++)
-            {
-                UINT LRATIndex = spWGProps->GetNodeLocalRootArgumentsTableIndex(WorkGraphIndex, i);
-                if (LRATIndex != -1)
-                {
-                    LocalRootArgsData[LRATIndex] = LRATIndex; // setting used entries to just store the table index
-                }
-            }
-            MakeBufferAndInitialize(D3D, &spLocalRootArgumentsTable, LocalRootArgsData.data(),
-                                    LocalRootArgumentsTable.SizeInBytes);
-            LocalRootArgumentsTable.StartAddress = spLocalRootArgumentsTable->GetGPUVirtualAddress();
-            LocalRootArgumentsTable.StrideInBytes = sizeof(UINT);
-        }
-    }
-    CComPtr<ID3D12WorkGraphProperties> spWGProps;
-    CComPtr<ID3D12Resource> spBackingMemory;
-    D3D12_GPU_VIRTUAL_ADDRESS_RANGE BackingMemory = {};
-    vector<UINT> LocalRootArgsData;
-    CComPtr<ID3D12Resource> spLocalRootArgumentsTable;
-    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE LocalRootArgumentsTable = {};
-    D3D12_PROGRAM_IDENTIFIER hWorkGraph = {};
-    D3D12_WORK_GRAPH_MEMORY_REQUIREMENTS MemReqs = {};
-    int MaxLocalRootArgumentsTableIndex = -1;
-    UINT NumEntrypoints = 0;
-    UINT NumNodes = 0;
-    UINT WorkGraphIndex = 0;
+    CComPtr<ID3D12StateObject> state_object;
+	ID3D12RootSignature* root_signature = nullptr;
 };
+
+void initialize_work_graph(D3DContext& D3D, WorkGraphContext& wg_context, ID3DBlob* library)
+{
+    PRINT(">>> Creating work graph...\n");
+	{
+		CD3DX12_STATE_OBJECT_DESC SO(D3D12_STATE_OBJECT_TYPE_EXECUTABLE);
+		auto pLib = SO.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+		CD3DX12_SHADER_BYTECODE libCode(library);
+		pLib->SetDXILLibrary(&libCode);
+		VERIFY_SUCCEEDED(D3D.device->CreateRootSignatureFromSubobjectInLibrary(
+			0, libCode.pShaderBytecode, libCode.BytecodeLength, L"globalRS", IID_PPV_ARGS(&wg_context.root_signature)));
+
+		auto pWG = SO.CreateSubobject<CD3DX12_WORK_GRAPH_SUBOBJECT>();
+		pWG->IncludeAllAvailableNodes(); // Auto populate the graph
+		LPCWSTR workGraphName = L"HelloWorkGraphs";
+		pWG->SetProgramName(workGraphName);
+
+		VERIFY_SUCCEEDED(D3D.device->CreateStateObject(SO, IID_PPV_ARGS(&wg_context.state_object)));
+        wg_context.Init(D3D, workGraphName);
+	}
+}
+
+void run_work_graph(D3DContext& D3D, WorkGraphContext& wg_context, image_data const& result)
+{
+    Transition(D3D.command_list, result.texture, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+    D3D.command_list->SetDescriptorHeaps(1, &D3D.srv_desc_heap);
+	D3D.command_list->SetComputeRootSignature(wg_context.root_signature);
+    D3D.command_list->SetComputeRootDescriptorTable(0, result.uav_gpu_handle);
+
+	D3D12_SET_PROGRAM_DESC setProg = {};
+	setProg.Type = D3D12_PROGRAM_TYPE_WORK_GRAPH;
+	setProg.WorkGraph.ProgramIdentifier = wg_context.hWorkGraph;
+	setProg.WorkGraph.Flags = D3D12_SET_WORK_GRAPH_FLAG_INITIALIZE;
+	setProg.WorkGraph.BackingMemory = wg_context.BackingMemory;
+	D3D.command_list->SetProgram(&setProg);
+
+	struct entryRecord
+	{
+		UINT gridSize[3]; // : SV_DispatchGrid;
+		UINT recordIndex;
+	};
+	vector<entryRecord> inputData;
+	UINT numRecords = 1;
+	inputData.resize(numRecords);
+	for (UINT recordIndex = 0; recordIndex < numRecords; recordIndex++)
+	{
+		inputData[recordIndex].gridSize[0] = result.width / 32u;
+        inputData[recordIndex].gridSize[1] = result.height / 32u;
+        inputData[recordIndex].gridSize[2] = 1u;
+		inputData[recordIndex].recordIndex = recordIndex;
+	}
+
+	// Spawn work
+	D3D12_DISPATCH_GRAPH_DESC DSDesc = {};
+	DSDesc.Mode = D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
+	DSDesc.NodeCPUInput.EntrypointIndex = 0; // just one entrypoint in this graph
+	DSDesc.NodeCPUInput.NumRecords = numRecords;
+	DSDesc.NodeCPUInput.RecordStrideInBytes = sizeof(entryRecord);
+	DSDesc.NodeCPUInput.pRecords = inputData.data();
+	D3D.command_list->DispatchGraph(&DSDesc);
+
+    Transition(D3D.command_list, result.texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+}
 
 int main(int, char**)
 {
 	WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"ImGui Example", nullptr };
 	::RegisterClassExW(&wc);
-	HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Dear ImGui DirectX12 Example", WS_OVERLAPPEDWINDOW, 100, 100, 1280, 800, nullptr, nullptr, wc.hInstance, nullptr);
+	HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Dear ImGui DirectX12 Example", WS_OVERLAPPEDWINDOW, 100, 100, 1920, 1080, nullptr, nullptr, wc.hInstance, nullptr);
 
 	const char* pFile = g_File;
 	const size_t cSize = strlen(pFile) + 1;
@@ -163,6 +189,19 @@ int main(int, char**)
 		bool ret = LoadTextureFromFile("data/albert.jpg", D3D.device, image.srv_cpu_handle, &image.texture, &image.width, &image.height);
     }
 
+    WorkGraphContext wg_context;
+    initialize_work_graph(D3D, wg_context, library);
+
+    image_data result;
+    {
+		result.width = image.width;
+		result.height = image.height;
+        auto flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        D3D.srv_desc_heap_alloc.Alloc(&result.srv_cpu_handle, &result.srv_gpu_handle);
+        D3D.srv_desc_heap_alloc.Alloc(&result.uav_cpu_handle, &result.uav_gpu_handle);
+        MakeTexture(D3D, &result.texture, result.width, result.height, DXGI_FORMAT_R16G16B16A16_FLOAT, flags, result.srv_cpu_handle, result.uav_cpu_handle);
+    }
+
 	// Main loop
 	bool done = false;
     while (!done)
@@ -190,23 +229,19 @@ int main(int, char**)
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
 
-        //ImGui::ShowDemoWindow(&show_demo_window);
-        {
-			ImGui::Begin("DirectX12 Texture Test");
-			ImGui::Text("CPU handle = %p", image.srv_cpu_handle.ptr);
-			ImGui::Text("GPU handle = %p", image.srv_gpu_handle.ptr);
-			ImGui::Text("size = %d x %d", image.width, image.height);
-			// Note that we pass the GPU SRV handle here, *not* the CPU handle. We're passing the internal pointer value, cast to an ImTextureID
-			ImGui::Image((ImTextureID)image.srv_gpu_handle.ptr, ImVec2((float)image.width, (float)image.height));
-			ImGui::End();
-        }
-        ImGui::Render();
-
 		FrameContext* frameCtx = WaitForNextFrameResources(D3D);
 		UINT backBufferIdx = D3D.swapchain->GetCurrentBackBufferIndex();
 		frameCtx->CommandAllocator->Reset();
 
         D3D.command_list->Reset(frameCtx->CommandAllocator, nullptr);
+        run_work_graph(D3D, wg_context, result);
+        {
+			ImGui::Begin("DirectX12 Work Graph Test");
+			ImGui::Image((ImTextureID)result.srv_gpu_handle.ptr, ImVec2((float)result.width, (float)result.height));
+			ImGui::End();
+		}
+		ImGui::Render();
+
         Transition(D3D.command_list, D3D.main_render_target_resource[backBufferIdx], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
 		// Render Dear ImGui graphics

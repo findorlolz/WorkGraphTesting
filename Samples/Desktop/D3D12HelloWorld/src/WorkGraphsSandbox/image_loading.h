@@ -9,6 +9,8 @@ struct image_data
 {
 	D3D12_CPU_DESCRIPTOR_HANDLE srv_cpu_handle;
 	D3D12_GPU_DESCRIPTOR_HANDLE srv_gpu_handle;
+	D3D12_CPU_DESCRIPTOR_HANDLE uav_cpu_handle;
+	D3D12_GPU_DESCRIPTOR_HANDLE uav_gpu_handle;
 	UINT width = 0u;
 	UINT height = 0u;
 	ID3D12Resource* texture = nullptr;

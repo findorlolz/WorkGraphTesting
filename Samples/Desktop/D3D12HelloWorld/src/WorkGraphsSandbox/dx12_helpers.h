@@ -656,3 +656,31 @@ void CleanupRenderTarget(D3DContext& D3D)
 		}
 	}
 }
+
+void MakeTexture(D3DContext& D3D, ID3D12Resource** ppResource, UINT image_width, UINT image_height, DXGI_FORMAT format,
+	D3D12_RESOURCE_FLAGS flags, D3D12_CPU_DESCRIPTOR_HANDLE srv_cpu_handle, D3D12_CPU_DESCRIPTOR_HANDLE uav_cpu_handle)
+{
+
+	auto uavDesc = CD3DX12_RESOURCE_DESC::Tex2D(format, image_width, image_height, 1, 1, 1, 0, flags);
+	auto defaultHeapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+	ID3D12Resource* pTexture = nullptr;
+	VERIFY_SUCCEEDED(D3D.device->CreateCommittedResource(
+		&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &uavDesc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&pTexture)));
+	
+	D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {};
+	UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+	D3D.device->CreateUnorderedAccessView(pTexture, nullptr, &UAVDesc, uav_cpu_handle);
+
+	// Create a shader resource view for the texture
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc;
+	ZeroMemory(&srvDesc, sizeof(srvDesc));
+	srvDesc.Format = format;
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	srvDesc.Texture2D.MipLevels = 1;
+	srvDesc.Texture2D.MostDetailedMip = 0;
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	D3D.device->CreateShaderResourceView(pTexture, &srvDesc, srv_cpu_handle);
+
+	*ppResource = pTexture;
+}

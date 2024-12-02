@@ -657,7 +657,7 @@ void CleanupRenderTarget(D3DContext& D3D)
 	}
 }
 
-void MakeTexture(D3DContext& D3D, ID3D12Resource** ppResource, UINT image_width, UINT image_height, DXGI_FORMAT format,
+void MakeTextureSRVAndUAV(D3DContext& D3D, ID3D12Resource** ppResource, UINT image_width, UINT image_height, DXGI_FORMAT format,
 	D3D12_RESOURCE_FLAGS flags, D3D12_CPU_DESCRIPTOR_HANDLE srv_cpu_handle, D3D12_CPU_DESCRIPTOR_HANDLE uav_cpu_handle)
 {
 

@@ -75,13 +75,14 @@ void initialize_work_graph(D3DContext& D3D, WorkGraphContext& wg_context, ID3DBl
 	}
 }
 
-void run_work_graph(D3DContext& D3D, WorkGraphContext& wg_context, image_data const& result)
+void run_work_graph(D3DContext& D3D, WorkGraphContext& wg_context, image_data const& result, image_data const& input)
 {
     Transition(D3D.command_list, result.texture, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     D3D.command_list->SetDescriptorHeaps(1, &D3D.srv_desc_heap);
 	D3D.command_list->SetComputeRootSignature(wg_context.root_signature);
     D3D.command_list->SetComputeRootDescriptorTable(0, result.uav_gpu_handle);
+    D3D.command_list->SetComputeRootDescriptorTable(1, input.srv_gpu_handle);
 
 	D3D12_SET_PROGRAM_DESC setProg = {};
 	setProg.Type = D3D12_PROGRAM_TYPE_WORK_GRAPH;
@@ -92,7 +93,7 @@ void run_work_graph(D3DContext& D3D, WorkGraphContext& wg_context, image_data co
 
 	struct entryRecord
 	{
-		UINT gridSize[3]; // : SV_DispatchGrid;
+		UINT gridSize[3];
 		UINT recordIndex;
 	};
 	vector<entryRecord> inputData;
@@ -106,10 +107,9 @@ void run_work_graph(D3DContext& D3D, WorkGraphContext& wg_context, image_data co
 		inputData[recordIndex].recordIndex = recordIndex;
 	}
 
-	// Spawn work
 	D3D12_DISPATCH_GRAPH_DESC DSDesc = {};
 	DSDesc.Mode = D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
-	DSDesc.NodeCPUInput.EntrypointIndex = 0; // just one entrypoint in this graph
+	DSDesc.NodeCPUInput.EntrypointIndex = 0;
 	DSDesc.NodeCPUInput.NumRecords = numRecords;
 	DSDesc.NodeCPUInput.RecordStrideInBytes = sizeof(entryRecord);
 	DSDesc.NodeCPUInput.pRecords = inputData.data();
@@ -199,7 +199,7 @@ int main(int, char**)
         auto flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
         D3D.srv_desc_heap_alloc.Alloc(&result.srv_cpu_handle, &result.srv_gpu_handle);
         D3D.srv_desc_heap_alloc.Alloc(&result.uav_cpu_handle, &result.uav_gpu_handle);
-        MakeTexture(D3D, &result.texture, result.width, result.height, DXGI_FORMAT_R16G16B16A16_FLOAT, flags, result.srv_cpu_handle, result.uav_cpu_handle);
+        MakeTextureSRVAndUAV(D3D, &result.texture, result.width, result.height, DXGI_FORMAT_R16G16B16A16_FLOAT, flags, result.srv_cpu_handle, result.uav_cpu_handle);
     }
 
 	// Main loop
@@ -234,7 +234,7 @@ int main(int, char**)
 		frameCtx->CommandAllocator->Reset();
 
         D3D.command_list->Reset(frameCtx->CommandAllocator, nullptr);
-        run_work_graph(D3D, wg_context, result);
+        run_work_graph(D3D, wg_context, result, image);
         {
 			ImGui::Begin("DirectX12 Work Graph Test");
 			ImGui::Image((ImTextureID)result.srv_gpu_handle.ptr, ImVec2((float)result.width, (float)result.height));

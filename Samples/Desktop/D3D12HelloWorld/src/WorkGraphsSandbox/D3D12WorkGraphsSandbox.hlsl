@@ -25,9 +25,11 @@
 // ================================================================================================================================
 GlobalRootSignature globalRS = 
 {
-    "DescriptorTable( UAV( u0 ) )"
+    "DescriptorTable( UAV( u0 ) ),"
+    "DescriptorTable( SRV( t1, numDescriptors = 1) )" 
 };
 RWTexture2D<float4> UAV : register(u0);
+Texture2D<float4> SRV : register(t1);
 
 struct entryRecord
 {
@@ -64,7 +66,7 @@ void firstNode(
     uint3 dispatchThreadID : SV_DispatchThreadID)
 {
     uint2 i = dispatchThreadID.xy;
-    float4 r = float4(1.0f, .0f, .0f, 1.0f);
+    float4 r = SRV[i];
     UAV[i] = r;
 #if 0
     // Methods for allocating output records must be called at thread group scope (uniform call across the group)

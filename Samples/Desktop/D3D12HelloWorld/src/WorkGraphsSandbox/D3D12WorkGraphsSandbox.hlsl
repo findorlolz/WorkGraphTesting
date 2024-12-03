@@ -37,13 +37,13 @@ struct entryRecord
     uint recordIndex;
 };
 
-#if 0
 struct secondNodeInput
 {
-    uint entryRecordIndex;
-    uint incrementValue;
+    float4 value;
+    uint2 index;
 };
 
+#if 0
 struct thirdNodeInput
 {
     uint entryRecordIndex;
@@ -56,56 +56,48 @@ static const uint c_numEntryRecords = 1;
 [Shader("node")]
 [NodeLaunch("broadcasting")]
 [NodeMaxDispatchGrid(256,256,1)]
-[NumThreads(32,32,1)]
+[NumThreads(16,16,1)]
 void firstNode(
     DispatchNodeInputRecord<entryRecord> inputData,
-#if 0
-    [MaxRecords(2)] NodeOutput<secondNodeInput> secondNode,
-#endif
-    uint threadIndex : SV_GroupIndex,
+    [MaxRecords(256)] NodeOutput<secondNodeInput> secondNode,
+    uint3 groupThreadID : SV_GroupThreadID,
     uint3 dispatchThreadID : SV_DispatchThreadID)
 {
     uint2 i = dispatchThreadID.xy;
     float4 r = SRV[i];
-    UAV[i] = r;
-#if 0
-    // Methods for allocating output records must be called at thread group scope (uniform call across the group)
-    // Allocations can be per thread as well: GetThreadNodeOutputRecords(...), but the call still has to be
-    // group uniform albeit with thread-varying arguments.  Thread execution doesn't have to be synchronized (Barrier call not needed).
-    GroupNodeOutputRecords<secondNodeInput> outRecs =
-        secondNode.GetGroupNodeOutputRecords(2);
 
-    // In a future language version, "->" will be available instead of ".Get()" below to access record members
-    outRecs[threadIndex].entryRecordIndex = inputData.Get().recordIndex; // inputData is constant for all threads in a dispatch grid, 
-                                                                         // broadcast from input record
-    outRecs[threadIndex].incrementValue = dispatchThreadID*2 + threadIndex + 1; // tell consumer how much to increment UAV[entryRecordIndex]
-    outRecs.OutputComplete(); // Call must be group uniform.  Thread execution doesn't have to be synchronized (Barrier call not needed).
-#endif
+    uint u = groupThreadID.x + groupThreadID.y * 16;
+    GroupNodeOutputRecords<secondNodeInput> out_record = secondNode.GetGroupNodeOutputRecords(256);
+    out_record[u].value = r;
+    out_record[u].index = i;
+    out_record.OutputComplete();
 }
 
-// --------------------------------------------------------------------------------------------------------------------------------
-// secondNode is thread launch, so one thread per input record.
-// 
-// Logs to the UAV and then sends a task to thirdNode
-// --------------------------------------------------------------------------------------------------------------------------------
 #if 0
+[Shader("node")]
+[NodeLaunch("coalescing")]
+[NumThreads(16,16,1)]
+void secondNode(
+    [MaxRecords(256)] GroupNodeInputRecords<secondNodeInput> inputData,
+    uint threadIndex : SV_GroupIndex)
+{
+    float4 r = inputData[threadIndex].value;
+    uint2 i = inputData[threadIndex].index;
+    UAV[i] = r;
+}
+#else
 [Shader("node")]
 [NodeLaunch("thread")]
 void secondNode(
-    ThreadNodeInputRecord<secondNodeInput> inputData,
-    [MaxRecords(1)] NodeOutput<thirdNodeInput> thirdNode)
+    ThreadNodeInputRecord<secondNodeInput> inputData)
 {
-    // In a future language version, "->" will be available instead of ".Get()" to access record members
-
-    // UAV[entryRecordIndex] (as uint) is the sum of all outputs from upstream node for graph entry [entryRecordIndex]
-    InterlockedAdd(UAV[inputData.Get().entryRecordIndex], inputData.Get().incrementValue);
-
-    // For every thread send a task to thirdNode
-    ThreadNodeOutputRecords<thirdNodeInput> outRec = thirdNode.GetThreadNodeOutputRecords(1);
-    outRec.Get().entryRecordIndex = inputData.Get().entryRecordIndex;
-    outRec.OutputComplete();
+    float4 r = inputData.Get().value;
+    uint2 i = inputData.Get().index;
+    UAV[i] = r; 
 }
+#endif
 
+#if 0
 groupshared uint g_sum[c_numEntryRecords];
 
 // --------------------------------------------------------------------------------------------------------------------------------

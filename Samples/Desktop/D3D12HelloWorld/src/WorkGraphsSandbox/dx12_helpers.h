@@ -114,6 +114,7 @@ public:
 	ID3D12Fence* fence = nullptr;
 	ID3D12DescriptorHeap* rtv_desc_heap = nullptr;
 	ID3D12DescriptorHeap* srv_desc_heap = nullptr;
+	ID3D12DescriptorHeap* clear_desc_heap = nullptr;
 	UINT64 FenceValue = 0u;
 	HANDLE hEvent = nullptr;
 	ID3D12Resource* main_render_target_resource[APP_NUM_BACK_BUFFERS] = {};
@@ -122,6 +123,7 @@ public:
 	bool SwapChainOccluded = false;
 	HANDLE hSwapChainWaitableObject = nullptr;
 	ExampleDescriptorHeapAllocator srv_desc_heap_alloc;
+	D3D12_CPU_DESCRIPTOR_HANDLE clear_uav_descriptor;
 	
 	FrameContext frameContext[APP_NUM_FRAMES_IN_FLIGHT] = {};
 	UINT uFrameIndex = 0u;
@@ -320,6 +322,15 @@ void InitDeviceAndContext(D3DContext& D3D, HWND hWnd)
 				D3D.mainRenderTargetDescriptor[i] = rtvHandle;
 				rtvHandle.ptr += rtvDescriptorSize;
 			}
+		}
+		{
+			D3D12_DESCRIPTOR_HEAP_DESC desc = {};
+			desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+			desc.NumDescriptors = 1;
+			desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+			desc.NodeMask = 1;
+			VERIFY_SUCCEEDED(D3D.device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&D3D.clear_desc_heap)));
+			D3D.clear_uav_descriptor = D3D.clear_desc_heap->GetCPUDescriptorHandleForHeapStart();
 		}
 		{
 			D3D12_DESCRIPTOR_HEAP_DESC desc = {};
@@ -658,7 +669,8 @@ void CleanupRenderTarget(D3DContext& D3D)
 }
 
 void MakeTextureSRVAndUAV(D3DContext& D3D, ID3D12Resource** ppResource, UINT image_width, UINT image_height, DXGI_FORMAT format,
-	D3D12_RESOURCE_FLAGS flags, D3D12_CPU_DESCRIPTOR_HANDLE srv_cpu_handle, D3D12_CPU_DESCRIPTOR_HANDLE uav_cpu_handle)
+	D3D12_RESOURCE_FLAGS flags, D3D12_CPU_DESCRIPTOR_HANDLE srv_cpu_handle, D3D12_CPU_DESCRIPTOR_HANDLE uav_cpu_handle,
+	D3D12_CPU_DESCRIPTOR_HANDLE clear_cpu_handle)
 {
 
 	auto uavDesc = CD3DX12_RESOURCE_DESC::Tex2D(format, image_width, image_height, 1, 1, 1, 0, flags);
@@ -671,6 +683,7 @@ void MakeTextureSRVAndUAV(D3DContext& D3D, ID3D12Resource** ppResource, UINT ima
 	D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {};
 	UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
 	D3D.device->CreateUnorderedAccessView(pTexture, nullptr, &UAVDesc, uav_cpu_handle);
+	D3D.device->CreateUnorderedAccessView(pTexture, nullptr, &UAVDesc, clear_cpu_handle);
 
 	// Create a shader resource view for the texture
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc;

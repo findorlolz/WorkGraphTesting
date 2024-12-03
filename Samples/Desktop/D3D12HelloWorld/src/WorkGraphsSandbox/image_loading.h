@@ -18,7 +18,8 @@ struct image_data
 
 // Simple helper function to load an image into a DX12 texture with common settings
 // Returns true on success, with the SRV CPU handle having an SRV for the newly-created texture placed in it (srv_cpu_handle must be a handle in a valid descriptor heap)
-bool LoadTextureFromMemory(const void* data, size_t data_size, ID3D12Device* d3d_device, D3D12_CPU_DESCRIPTOR_HANDLE srv_cpu_handle, ID3D12Resource** out_tex_resource, UINT* out_width, UINT* out_height)
+bool LoadTextureFromMemory(const void* data, size_t data_size, ID3D12Device* d3d_device, D3D12_CPU_DESCRIPTOR_HANDLE srv_cpu_handle, ID3D12Resource** out_tex_resource, 
+	UINT* out_width, UINT* out_height, D3D12_RESOURCE_STATES state)
 {
 	// Load from disk into a raw RGBA buffer
 	int image_width = 0;
@@ -106,7 +107,7 @@ bool LoadTextureFromMemory(const void* data, size_t data_size, ID3D12Device* d3d
 	barrier.Transition.pResource = pTexture;
 	barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+	barrier.Transition.StateAfter = state;
 
 	// Create a temporary command queue to do the copy with
 	ID3D12Fence* fence = NULL;
@@ -176,7 +177,8 @@ bool LoadTextureFromMemory(const void* data, size_t data_size, ID3D12Device* d3d
 }
 
 // Open and read a file, then forward to LoadTextureFromMemory()
-bool LoadTextureFromFile(const char* file_name, ID3D12Device* d3d_device, D3D12_CPU_DESCRIPTOR_HANDLE srv_cpu_handle, ID3D12Resource** out_tex_resource, UINT* out_width, UINT* out_height)
+bool LoadTextureFromFile(const char* file_name, ID3D12Device* d3d_device, D3D12_CPU_DESCRIPTOR_HANDLE srv_cpu_handle, ID3D12Resource** out_tex_resource, 
+	UINT* out_width, UINT* out_height, D3D12_RESOURCE_STATES state)
 {
 	FILE* f = fopen(file_name, "rb");
 	if (f == NULL)
@@ -188,7 +190,7 @@ bool LoadTextureFromFile(const char* file_name, ID3D12Device* d3d_device, D3D12_
 	fseek(f, 0, SEEK_SET);
 	void* file_data = IM_ALLOC(file_size);
 	fread(file_data, 1, file_size, f);
-	bool ret = LoadTextureFromMemory(file_data, file_size, d3d_device, srv_cpu_handle, out_tex_resource, out_width, out_height);
+	bool ret = LoadTextureFromMemory(file_data, file_size, d3d_device, srv_cpu_handle, out_tex_resource, out_width, out_height, state);
 	IM_FREE(file_data);
 	return ret;
 }

@@ -13,7 +13,7 @@ Explore Work Graphs by implementing a simple screen space filter for an image. T
 * Simple project structure
 * Added imgui etc. since DX12 sample was purely command line app
 * Image loading (imgui, std_image)
-* Simple Work Graph with necessary resources and a single node that copies the input texture to UAV
+* Simple Work Graph with necessary resources and two nodes (broadcast and thread) that copies the input texture to UAV
 
 ## TODO
 

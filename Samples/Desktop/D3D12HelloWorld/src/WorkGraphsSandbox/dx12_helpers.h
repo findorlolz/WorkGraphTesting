@@ -26,6 +26,8 @@ bool g_useWarpDevice = false;
 static const int APP_NUM_FRAMES_IN_FLIGHT = 3;
 static const int APP_NUM_BACK_BUFFERS = 3;
 static const int APP_SRV_HEAP_SIZE = 64;
+static const int APP_CLEAR_HEAP_SIZE = 4;
+
 
 //=================================================================================================================================
 // Helper / setup code, not specific to work graphs
@@ -64,14 +66,17 @@ struct ExampleDescriptorHeapAllocator
 	D3D12_GPU_DESCRIPTOR_HANDLE HeapStartGpu;
 	UINT                        HeapHandleIncrement;
 	std::vector<int>               FreeIndices;
+	bool						shader_visible = true;
 
-	void Create(ID3D12Device* device, ID3D12DescriptorHeap* heap)
+	void Create(ID3D12Device* device, ID3D12DescriptorHeap* heap, bool is_shader_visible)
 	{
 		Heap = heap;
+		shader_visible = is_shader_visible;
 		D3D12_DESCRIPTOR_HEAP_DESC desc = heap->GetDesc();
 		HeapType = desc.Type;
 		HeapStartCpu = Heap->GetCPUDescriptorHandleForHeapStart();
-		HeapStartGpu = Heap->GetGPUDescriptorHandleForHeapStart();
+		if(shader_visible)
+			HeapStartGpu = Heap->GetGPUDescriptorHandleForHeapStart();
 		HeapHandleIncrement = device->GetDescriptorHandleIncrementSize(HeapType);
 		FreeIndices.reserve((int)desc.NumDescriptors);
 		for (int n = desc.NumDescriptors; n > 0; n--)
@@ -87,12 +92,12 @@ struct ExampleDescriptorHeapAllocator
 		int idx = FreeIndices.back();
 		FreeIndices.pop_back();
 		out_cpu_desc_handle->ptr = HeapStartCpu.ptr + (idx * HeapHandleIncrement);
-		out_gpu_desc_handle->ptr = HeapStartGpu.ptr + (idx * HeapHandleIncrement);
+		if(shader_visible)
+			out_gpu_desc_handle->ptr = HeapStartGpu.ptr + (idx * HeapHandleIncrement);
 	}
 	void Free(D3D12_CPU_DESCRIPTOR_HANDLE out_cpu_desc_handle, D3D12_GPU_DESCRIPTOR_HANDLE out_gpu_desc_handle)
 	{
 		int cpu_idx = (int)((out_cpu_desc_handle.ptr - HeapStartCpu.ptr) / HeapHandleIncrement);
-		int gpu_idx = (int)((out_gpu_desc_handle.ptr - HeapStartGpu.ptr) / HeapHandleIncrement);
 		FreeIndices.push_back(cpu_idx);
 	}
 };
@@ -123,7 +128,7 @@ public:
 	bool SwapChainOccluded = false;
 	HANDLE hSwapChainWaitableObject = nullptr;
 	ExampleDescriptorHeapAllocator srv_desc_heap_alloc;
-	D3D12_CPU_DESCRIPTOR_HANDLE clear_uav_descriptor;
+	ExampleDescriptorHeapAllocator clear_desc_heap_alloc;
 	
 	FrameContext frameContext[APP_NUM_FRAMES_IN_FLIGHT] = {};
 	UINT uFrameIndex = 0u;
@@ -326,11 +331,11 @@ void InitDeviceAndContext(D3DContext& D3D, HWND hWnd)
 		{
 			D3D12_DESCRIPTOR_HEAP_DESC desc = {};
 			desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-			desc.NumDescriptors = 1;
+			desc.NumDescriptors = APP_CLEAR_HEAP_SIZE;
 			desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 			desc.NodeMask = 1;
 			VERIFY_SUCCEEDED(D3D.device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&D3D.clear_desc_heap)));
-			D3D.clear_uav_descriptor = D3D.clear_desc_heap->GetCPUDescriptorHandleForHeapStart();
+			D3D.clear_desc_heap_alloc.Create(D3D.device, D3D.clear_desc_heap, false);
 		}
 		{
 			D3D12_DESCRIPTOR_HEAP_DESC desc = {};
@@ -338,7 +343,7 @@ void InitDeviceAndContext(D3DContext& D3D, HWND hWnd)
 			desc.NumDescriptors = APP_SRV_HEAP_SIZE;
 			desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 			D3D.device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&D3D.srv_desc_heap));
-			D3D.srv_desc_heap_alloc.Create(D3D.device, D3D.srv_desc_heap);
+			D3D.srv_desc_heap_alloc.Create(D3D.device, D3D.srv_desc_heap, true);
 		}
 	}
 

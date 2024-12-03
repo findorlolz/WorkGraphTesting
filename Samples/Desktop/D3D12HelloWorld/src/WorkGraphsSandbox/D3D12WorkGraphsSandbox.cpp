@@ -81,7 +81,7 @@ void run_work_graph(D3DContext& D3D, WorkGraphContext& wg_context, image_data co
 
     D3D.command_list->SetDescriptorHeaps(1, &D3D.srv_desc_heap);
     const float clear_color[4] = { 1.0f, .0f, .0f, 1.0f };
-    D3D.command_list->ClearUnorderedAccessViewFloat(result.uav_gpu_handle, D3D.clear_uav_descriptor, result.texture, clear_color, 0, nullptr);
+    D3D.command_list->ClearUnorderedAccessViewFloat(result.uav_gpu_handle, result.clear_cpu_handle, result.texture, clear_color, 0, nullptr);
 
 	D3D.command_list->SetComputeRootSignature(wg_context.root_signature);
     D3D.command_list->SetComputeRootDescriptorTable(0, result.uav_gpu_handle);
@@ -191,8 +191,9 @@ int main(int, char**)
         auto flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
         D3D.srv_desc_heap_alloc.Alloc(&result.srv_cpu_handle, &result.srv_gpu_handle);
         D3D.srv_desc_heap_alloc.Alloc(&result.uav_cpu_handle, &result.uav_gpu_handle);
+		D3D.clear_desc_heap_alloc.Alloc(&result.clear_cpu_handle, &result.clear_gpu_handle);
         MakeTextureSRVAndUAV(D3D, &result.texture, result.width, result.height, DXGI_FORMAT_R16G16B16A16_FLOAT, flags, 
-            result.srv_cpu_handle, result.uav_cpu_handle, D3D.clear_uav_descriptor);
+            result.srv_cpu_handle, result.uav_cpu_handle, result.clear_cpu_handle);
     }
 
 	// Main loop
